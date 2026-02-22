@@ -1,0 +1,348 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Talk to Me — Hardik Sharma</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <div class="page">
+    <div class="nav">
+      <div class="logo">Hardik Sharma</div>
+      <div>
+        <a href="/index.html">Home</a>
+        <a href="/projects.html">Projects</a>
+        <a href="/skills.html">Skills</a>
+        <a href="/talk.html" class="nav-cta">Talk to Me</a>
+      </div>
+    </div>
+
+    <section class="section">
+      <h2>Talk to Me</h2>
+      <div class="talk">
+        <div class="card">
+          <div class="avatar-wrap">
+            <div class="glow"></div>
+            <div id="avatar">Waiting for stream...</div>
+          </div>
+          <div id="controls">
+            <button id="start" class="primary">Start Session</button>
+            <button id="ptt" class="primary" disabled>Hold to Talk</button>
+            <button id="stop" disabled>End Session</button>
+            <div class="toggle">
+              <span>Mode</span>
+              <select id="input-mode">
+                <option value="ptt" selected>Push‑to‑Talk</option>
+                <option value="open">Open‑Mic</option>
+              </select>
+            </div>
+          </div>
+          <div class="chat-input">
+            <input id="text-input" type="text" placeholder="Type a message…" disabled />
+            <button id="send-text" disabled>Send</button>
+          </div>
+          <div class="status">
+            <div class="pill" id="status-connection">Status: idle</div>
+            <div class="pill" id="status-mic">Mic: off</div>
+            <div class="pill" id="status-session">Session: none</div>
+            <div class="pill" id="status-timer">Ends in: --:--</div>
+            <div class="pill" id="status-speaking">Avatar: idle</div>
+          </div>
+        </div>
+        <div class="card">
+          <div class="pill">Live Transcript</div>
+          <div class="chat" id="chat" style="margin-top:10px;"></div>
+          <div class="pill" style="margin-top:14px;">Event Stream</div>
+          <div class="log" id="log"></div>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <script src="https://unpkg.com/livekit-client/dist/livekit-client.umd.js"></script>
+  <script>
+    const startBtn = document.getElementById('start');
+    const pttBtn = document.getElementById('ptt');
+    const logEl = document.getElementById('log');
+    const chatEl = document.getElementById('chat');
+    const avatarEl = document.getElementById('avatar');
+    const stopBtn = document.getElementById('stop');
+    const statusConnection = document.getElementById('status-connection');
+    const statusMic = document.getElementById('status-mic');
+    const statusSession = document.getElementById('status-session');
+    const statusTimer = document.getElementById('status-timer');
+    const statusSpeaking = document.getElementById('status-speaking');
+    const inputModeEl = document.getElementById('input-mode');
+    const textInputEl = document.getElementById('text-input');
+    const sendTextBtn = document.getElementById('send-text');
+
+    let room;
+    let sessionId;
+    let sessionToken;
+    let livekitUrl;
+    let livekitToken;
+    let timerId;
+    let sessionEndsAt = null;
+    let reconnectAttempts = 0;
+    const MAX_RECONNECTS = 3;
+
+    function log(msg) {
+      logEl.textContent = msg + '\n' + logEl.textContent;
+    }
+
+    function addChat(role, text) {
+      const item = document.createElement('div');
+      item.className = 'chat-item ' + role;
+      const label = document.createElement('div');
+      label.className = 'chat-role';
+      label.textContent = role === 'user' ? 'User' : 'Avatar';
+      const body = document.createElement('div');
+      body.className = 'chat-text';
+      body.textContent = text;
+      item.appendChild(label);
+      item.appendChild(body);
+      chatEl.prepend(item);
+    }
+
+    function formatTime(ms) {
+      const total = Math.max(0, Math.floor(ms / 1000));
+      const m = String(Math.floor(total / 60)).padStart(2, '0');
+      const s = String(total % 60).padStart(2, '0');
+      return `${m}:${s}`;
+    }
+
+    function startCountdown(maxSeconds) {
+      sessionEndsAt = Date.now() + maxSeconds * 1000;
+      statusTimer.textContent = `Ends in: ${formatTime(maxSeconds * 1000)}`;
+      if (timerId) clearInterval(timerId);
+      timerId = setInterval(() => {
+        const left = sessionEndsAt - Date.now();
+        statusTimer.textContent = `Ends in: ${formatTime(left)}`;
+        if (left <= 0) {
+          clearInterval(timerId);
+          endSession();
+        }
+      }, 1000);
+    }
+
+    async function reconnect() {
+      if (!room || !livekitUrl || !livekitToken) return;
+      if (reconnectAttempts >= MAX_RECONNECTS) {
+        statusConnection.textContent = 'Status: reconnect failed';
+        return;
+      }
+      reconnectAttempts += 1;
+      statusConnection.textContent = `Status: reconnecting (${reconnectAttempts}/${MAX_RECONNECTS})`;
+      try {
+        await room.connect(livekitUrl, livekitToken);
+        statusConnection.textContent = 'Status: connected';
+        reconnectAttempts = 0;
+      } catch (e) {
+        setTimeout(reconnect, 1500 * reconnectAttempts);
+      }
+    }
+
+    function getLivekitFields(data) {
+      const d = data.data || {};
+      const livekitUrlLocal =
+        data.livekit_url ||
+        d.livekit_url ||
+        data.room_url ||
+        data.url ||
+        (data.livekit && data.livekit.url);
+      const livekitTokenLocal =
+        data.livekit_client_token ||
+        d.livekit_client_token ||
+        data.livekit_token ||
+        data.room_token ||
+        data.token ||
+        (data.livekit && data.livekit.token);
+      return { livekitUrl: livekitUrlLocal, livekitToken: livekitTokenLocal };
+    }
+
+    async function sendEvent(eventType, data = {}) {
+      if (!room) return;
+      const payload = JSON.stringify({ event_type: eventType, session_id: sessionId, ...data });
+      const bytes = new TextEncoder().encode(payload);
+      await room.localParticipant.publishData(bytes, { reliable: true, topic: 'agent-control' });
+    }
+
+    async function sendText() {
+      const text = textInputEl.value.trim();
+      if (!text) return;
+      textInputEl.value = '';
+      await sendEvent('avatar.speak_response', { text });
+    }
+
+    startBtn.addEventListener('click', async () => {
+      startBtn.disabled = true;
+      statusConnection.textContent = 'Status: creating session';
+      log('Creating session...');
+
+      const resp = await fetch('/api/session', { method: 'POST' });
+      if (!resp.ok) {
+        const errText = await resp.text();
+        log('Failed to create session: ' + errText);
+        startBtn.disabled = false;
+        return;
+      }
+
+      const data = await resp.json();
+      sessionId = data.session_id;
+      sessionToken = data.session_token;
+      const lk = getLivekitFields(data);
+      livekitUrl = lk.livekitUrl;
+      livekitToken = lk.livekitToken;
+      const maxSessionSeconds = (data.data && data.data.max_session_duration) || data.max_session_duration || 0;
+
+      if (!livekitUrl || !livekitToken) {
+        log('Missing LiveKit connection info in response: ' + JSON.stringify(data));
+        statusConnection.textContent = 'Status: missing LiveKit info';
+        return;
+      }
+
+      room = new LivekitClient.Room();
+
+      room.on(LivekitClient.RoomEvent.TrackSubscribed, (track) => {
+        if (track.kind === 'video') {
+          const el = track.attach();
+          el.style.width = '100%';
+          el.style.height = '100%';
+          avatarEl.innerHTML = '';
+          avatarEl.appendChild(el);
+        } else if (track.kind === 'audio') {
+          const el = track.attach();
+          el.style.display = 'none';
+          document.body.appendChild(el);
+        }
+      });
+
+      room.on(LivekitClient.RoomEvent.DataReceived, (payload, _participant, _kind, topic) => {
+        try {
+          const text = new TextDecoder().decode(payload);
+          log(text);
+          if (topic === 'agent-response') {
+            const evt = JSON.parse(text);
+            if (evt.event_type === 'user.transcription' && evt.text) addChat('user', evt.text);
+            if (evt.event_type === 'avatar.transcription' && evt.text) addChat('avatar', evt.text);
+            if (evt.event_type === 'avatar.speak_started') statusSpeaking.textContent = 'Avatar: speaking';
+            if (evt.event_type === 'avatar.speak_ended') statusSpeaking.textContent = 'Avatar: idle';
+          }
+        } catch (e) {
+          log('Received non-text data.');
+        }
+      });
+
+      room.on(LivekitClient.RoomEvent.Disconnected, () => {
+        statusConnection.textContent = 'Status: disconnected';
+        reconnect();
+      });
+
+      await room.connect(livekitUrl, livekitToken);
+      log('Connected to LiveKit.');
+      statusConnection.textContent = 'Status: connected';
+
+      const mic = await LivekitClient.createLocalAudioTrack();
+      await room.localParticipant.publishTrack(mic);
+      log('Microphone published.');
+      statusMic.textContent = 'Mic: on';
+      statusSession.textContent = `Session: ${sessionId.slice(0, 8)}…`;
+      if (maxSessionSeconds > 0) startCountdown(maxSessionSeconds);
+
+      await sendEvent('avatar.start_listening');
+
+      pttBtn.disabled = false;
+      stopBtn.disabled = false;
+      textInputEl.disabled = false;
+      sendTextBtn.disabled = false;
+    });
+
+    const startTalk = () => sendEvent('user.start_push_to_talk');
+    const stopTalk = () => sendEvent('user.stop_push_to_talk');
+
+    pttBtn.addEventListener('mousedown', startTalk);
+    pttBtn.addEventListener('mouseup', stopTalk);
+    pttBtn.addEventListener('touchstart', (e) => { e.preventDefault(); startTalk(); });
+    pttBtn.addEventListener('touchend', (e) => { e.preventDefault(); stopTalk(); });
+
+    inputModeEl.addEventListener('change', async () => {
+      if (inputModeEl.value === 'open') {
+        pttBtn.disabled = true;
+        await sendEvent('avatar.start_listening');
+      } else {
+        pttBtn.disabled = false;
+      }
+    });
+
+    window.addEventListener('keydown', (e) => {
+      if (document.activeElement === textInputEl) return;
+      if (inputModeEl.value !== 'ptt') return;
+      if (e.code === 'Space' && !e.repeat) {
+        e.preventDefault();
+        startTalk();
+      }
+    });
+    window.addEventListener('keyup', (e) => {
+      if (document.activeElement === textInputEl) return;
+      if (inputModeEl.value !== 'ptt') return;
+      if (e.code === 'Space') {
+        e.preventDefault();
+        stopTalk();
+      }
+    });
+
+    sendTextBtn.addEventListener('click', sendText);
+    textInputEl.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') sendText();
+    });
+
+    async function endSession() {
+      if (!sessionId || !sessionToken) return;
+      try {
+        await fetch('/api/session/stop', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ session_id: sessionId, session_token: sessionToken })
+        });
+      } catch (e) {
+        log('Failed to stop session cleanly.');
+      }
+
+      if (room) {
+        room.disconnect();
+        room = null;
+      }
+      sessionId = null;
+      sessionToken = null;
+      livekitUrl = null;
+      livekitToken = null;
+      pttBtn.disabled = true;
+      stopBtn.disabled = true;
+      startBtn.disabled = false;
+      textInputEl.disabled = true;
+      sendTextBtn.disabled = true;
+      avatarEl.innerHTML = 'Waiting for stream...';
+      log('Session ended.');
+      statusConnection.textContent = 'Status: idle';
+      statusMic.textContent = 'Mic: off';
+      statusSession.textContent = 'Session: none';
+      statusTimer.textContent = 'Ends in: --:--';
+      statusSpeaking.textContent = 'Avatar: idle';
+      if (timerId) clearInterval(timerId);
+    }
+
+    stopBtn.addEventListener('click', endSession);
+    window.addEventListener('beforeunload', () => {
+      if (sessionId && sessionToken) {
+        navigator.sendBeacon('/api/session/stop', new Blob([
+          JSON.stringify({ session_id: sessionId, session_token: sessionToken })
+        ], { type: 'application/json' }));
+      }
+    });
+  </script>
+</body>
+</html>

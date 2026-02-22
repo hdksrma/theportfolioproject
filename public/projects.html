@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Projects — Hardik Sharma</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <div class="page">
+    <div class="nav">
+      <div class="logo">Hardik Sharma</div>
+      <div>
+        <a href="/index.html">Home</a>
+        <a href="/projects.html">Projects</a>
+        <a href="/skills.html">Skills</a>
+        <a href="/talk.html" class="nav-cta">Talk to Me</a>
+      </div>
+    </div>
+
+    <section class="section">
+      <h2>Featured Projects</h2>
+      <div class="grid">
+        <div class="card project-card" data-title="RAG Document Intelligence Platform" data-sub="ReAct + LangGraph + vector DB + Streamlit" data-points="Multi-source ingestion and chunking;Tool-augmented retrieval for precision;Fast search UX for internal teams">
+          RAG Document Intelligence Platform (ReAct + LangGraph + vector DB + Streamlit)
+        </div>
+        <div class="card project-card" data-title="LLM Fine-tuning" data-sub="LLaMA 3.x, LoRA/QLoRA" data-points="Domain-specific datasets and evals;Low-rank adaptation for rapid iteration;Latency-aware deployment">
+          LLM Fine-tuning (LLaMA 3.x, LoRA/QLoRA)
+        </div>
+        <div class="card project-card" data-title="Autonomous Trading System" data-sub="OpenAI Agents SDK + MCP" data-points="Agentic research and signal extraction;Risk controls and guardrails;End-to-end automation pipeline">
+          Autonomous Trading System (OpenAI Agents SDK + MCP)
+        </div>
+        <div class="card project-card" data-title="Study Buddy AI" data-sub="LLMOps/AIOps + Docker + Kubernetes + Prometheus" data-points="Reliable serving and monitoring;Observability-first pipelines;Cost-aware scaling">
+          Study Buddy AI (LLMOps/AIOps + Docker + Kubernetes + Prometheus)
+        </div>
+        <div class="card project-card" data-title="Network Security ML System" data-sub="ETL + CI/CD + MLOps + AWS" data-points="Automated ETL + training;CI/CD for model releases;Cloud-first deployments">
+          Network Security ML System (ETL + CI/CD + MLOps + AWS)
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <div class="modal" id="project-modal" role="dialog" aria-modal="true" aria-hidden="true">
+    <div class="modal-card">
+      <h3 class="modal-title" id="modal-title">Project</h3>
+      <div class="modal-sub" id="modal-sub">Subtitle</div>
+      <ul class="modal-list" id="modal-points"></ul>
+      <div class="modal-actions">
+        <button id="modal-close">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const projectModal = document.getElementById('project-modal');
+    const modalTitle = document.getElementById('modal-title');
+    const modalSub = document.getElementById('modal-sub');
+    const modalPoints = document.getElementById('modal-points');
+    const modalClose = document.getElementById('modal-close');
+
+    document.querySelectorAll('.project-card').forEach((card) => {
+      card.addEventListener('click', () => {
+        modalTitle.textContent = card.dataset.title || 'Project';
+        modalSub.textContent = card.dataset.sub || '';
+        const points = (card.dataset.points || '').split(';').filter(Boolean);
+        modalPoints.innerHTML = '';
+        points.forEach((p) => {
+          const li = document.createElement('li');
+          li.textContent = p;
+          modalPoints.appendChild(li);
+        });
+        projectModal.classList.add('open');
+        projectModal.setAttribute('aria-hidden', 'false');
+      });
+    });
+
+    function closeModal() {
+      projectModal.classList.remove('open');
+      projectModal.setAttribute('aria-hidden', 'true');
+    }
+
+    modalClose.addEventListener('click', closeModal);
+    projectModal.addEventListener('click', (e) => {
+      if (e.target === projectModal) closeModal();
+    });
+  </script>
+</body>
+</html>
